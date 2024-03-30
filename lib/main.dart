@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 
 void main() {
   runApp(MyApp());
@@ -30,6 +32,7 @@ class MyApp extends StatelessWidget {
           return DetalhesPage(deputadoId: deputadoId, deputados: deputados);
         },
       },
+      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -77,19 +80,36 @@ class HomePage extends StatelessWidget {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
+          actions: [
+            IconButton(
+              icon: Icon(Icons.settings),
+              onPressed: () {
+                // Adicione a ação desejada para o ícone de configuração
+              },
+            ),
+            IconButton(
+              icon: Icon(Icons.notifications),
+              onPressed: () {
+                // Adicione a ação desejada para o ícone de notificação
+              },
+            ),
+          ],
           title: Text('App Deputados'),
-          bottom: TabBar(
-            tabs: [
-              Tab(text: 'Deputados'),
-              Tab(text: 'Comissões'),
-            ],
-          ),
         ),
         body: TabBarView(
           children: [
             DeputadosPage(),
             ComissoesPage(),
           ],
+        ),
+        bottomNavigationBar: Container(
+          color: Colors.green,
+          child: TabBar(
+            tabs: [
+              Tab(text: 'Deputados'),
+              Tab(text: 'Comissões'),
+            ],
+          ),
         ),
       ),
     );
@@ -193,7 +213,7 @@ class ComissoesPage extends StatefulWidget {
 }
 
 class _ComissoesPageState extends State<ComissoesPage> {
-  List<dynamic> comissoes = [];
+  List<dynamic>? comissoes;
 
   @override
   void initState() {
@@ -203,28 +223,228 @@ class _ComissoesPageState extends State<ComissoesPage> {
 
   void _carregarComissoes() async {
     try {
-      var response = await ServicoAPI.obterComissoes();
-      setState(() {
-        comissoes = response['dados'] ?? [];
-      });
+      var url = 'https://dadosabertos.camara.leg.br/api/v2/orgaos';
+      var response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        var data = json.decode(response.body);
+        var orgaos = data['dados'];
+
+        setState(() {
+          comissoes = orgaos.map((orgao) {
+            return {
+              'id': orgao['id'],
+              'sigla': orgao['sigla'],
+              'nome': orgao['nome'],
+              'apelido': orgao['apelido'],
+              'codTipoOrgao': orgao['codTipoOrgao'],
+              'tipoOrgao': orgao['tipoOrgao'],
+              'nomePublicacao': orgao['nomePublicacao'],
+              'nomeResumido': orgao['nomeResumido'],
+            };
+          }).toList();
+        });
+      } else {
+        print(
+            'Erro ao obter comissões. Código de status: ${response.statusCode}');
+      }
     } catch (e) {
       print('Erro ao obter comissões: $e');
     }
   }
 
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Comissões'),
+      ),
+      body: comissoes != null
+          ? (comissoes!.isEmpty
+              ? Center(
+                  child: Text('Nenhuma comissão encontrada'),
+                )
+              : ListView.builder(
+                  itemCount: comissoes!.length,
+                  itemBuilder: (context, index) {
+                    var comissao = comissoes![index];
+                    return InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => DetalhesComissaoPage(
+                              comissaoId: comissao['id']
+                                  .toString(), // Converta para String
+                              comissao: comissao,
+                            ),
+                          ),
+                        );
+                      },
+                      child: Column(
+                        children: [
+                          ListTile(
+                            title: Text(comissao['apelido']),
+                            subtitle: Text(comissao['sigla']),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ))
+          : Center(
+              child: CircularProgressIndicator(),
+            ),
+    );
+  }
+}
+
+Future<List<dynamic>> obterMembrosComissao(String comissaoId) async {
+  final url =
+      'https://dadosabertos.camara.leg.br/api/v2/orgaos/$comissaoId/membros';
+  final response = await http.get(Uri.parse(url));
+
+  if (response.statusCode == 200) {
+    final data = json.decode(response.body);
+    final membros = data['dados'] as List<dynamic>;
+    return membros;
+  } else {
+    throw Exception('Falha ao carregar os membros da comissão');
+  }
+}
+
+class DetalhesComissaoPage extends StatelessWidget {
+  final String comissaoId;
+  final dynamic comissao;
+
+  DetalhesComissaoPage({required this.comissaoId, required this.comissao});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: ListView.builder(
-        itemCount: comissoes.length,
-        itemBuilder: (context, index) {
-          var comissao = comissoes[index];
-          return ListTile(
-            title: Text(comissao['nome']),
-            subtitle: Text(comissao['sigla']),
-          );
-        },
+      appBar: AppBar(
+        title: Text('Detalhes da Comissão'),
       ),
+      body: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              comissao['apelido'],
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Sigla: ${comissao['sigla']}',
+              style: TextStyle(fontSize: 14),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Id: ${comissao['id']}',
+              style: TextStyle(fontSize: 12),
+            ),
+            SizedBox(height: 16),
+            Divider(),
+            SizedBox(height: 16),
+            Text(
+              'Membros da Comissão:',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 16),
+            Expanded(
+              child: FutureBuilder<List<dynamic>>(
+                future: obterMembrosComissao(comissaoId),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return Center(child: CircularProgressIndicator());
+                  } else if (snapshot.hasError) {
+                    return Center(
+                        child: Text('Erro ao carregar os membros da comissão'));
+                  } else {
+                    final membros = snapshot.data;
+                    return GridView.builder(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 16,
+                        mainAxisSpacing: 16,
+                      ),
+                      itemCount: membros!.length,
+                      itemBuilder: (context, index) {
+                        var membro = membros[index];
+                        return GestureDetector(
+                          onTap: () {
+                            _exibirDetalhesMembro(context, membro);
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.grey[200],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                CircleAvatar(
+                                  radius: 30,
+                                  backgroundImage:
+                                      NetworkImage(membro['urlFoto'] ?? ''),
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  membro['nome'] ?? '',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                  textAlign: TextAlign.center,
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  membro['siglaPartido'] ?? '',
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _exibirDetalhesMembro(BuildContext context, dynamic membro) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(membro['nome'] ?? ''),
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Cargo: ${membro['cargo'] ?? ''}'),
+              // Adicione mais informações do membro aqui, se necessário
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text('Fechar'),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -340,6 +560,12 @@ class _DetalhesPageState extends State<DetalhesPage> {
       appBar: AppBar(
         title: Text(deputado['nome']),
         centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: () {},
+            icon: Icon(Icons.picture_as_pdf),
+          ),
+        ],
       ),
       body: Padding(
         padding: EdgeInsets.all(16.0),
@@ -353,65 +579,131 @@ class _DetalhesPageState extends State<DetalhesPage> {
                     radius: 50.0,
                   )
                 : Container(),
-            SizedBox(height: 16.0),
+            SizedBox(height: 8.0),
             Text(
               'ID: ${deputado['id']}',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                fontSize: 18.0,
+                fontStyle: FontStyle.italic,
+                fontSize: 12,
               ),
             ),
             Text(
               deputado['nome'],
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                fontSize: 24.0,
+                fontSize: 20.0,
               ),
             ),
             SizedBox(height: 8.0),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 Text('Estado: ${deputado['siglaUf']}'),
                 Text('Partido: ${deputado['siglaPartido']}'),
-                Text('Sexo: ${deputado['sexo']}'),
+                Text('Sexo: ${deputado['siglaSexo']}'),
               ],
             ),
             Text('E-mail: ${deputado['email']}'),
             SizedBox(height: 16.0),
             ElevatedButton(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (BuildContext context) {
-                    return AlertDialog(
-                      title: Text('Janela Modal'),
-                      content: Text('Este é um exemplo de janela modal.'),
-                      actions: [
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                          },
-                          child: Text('Fechar'),
+              onPressed: () async {
+                var response = await http.get(Uri.parse(
+                    'https://dadosabertos.camara.leg.br/api/v2/deputados/${widget.deputadoId}/eventos?itens=5'));
+
+                if (response.statusCode == 200) {
+                  var data = jsonDecode(response.body);
+                  var eventos = data['dados'];
+
+                  showDialog(
+                    context: context,
+                    builder: (BuildContext context) {
+                      return AlertDialog(
+                        title: Text(
+                          'Atividades de: ${deputado['nome']}',
                         ),
-                      ],
-                    );
-                  },
-                );
+                        content: SingleChildScrollView(
+                          child: Column(
+                            children: eventos.map<Widget>((evento) {
+                              var descricaoEvento = evento['descricao'];
+                              var dataEvento = evento['dataHoraInicio'];
+                              var formatoData = DateFormat('dd/MM/yyyy HH:mm');
+                              var dataFormatada = formatoData
+                                  .format(DateTime.parse(dataEvento));
+
+                              var urlRegistro = evento['urlRegistro'];
+                              var uri = Uri.parse(urlRegistro);
+                              var dominio = uri.host;
+
+                              return Column(
+                                children: [
+                                  Text(
+                                    descricaoEvento,
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  SizedBox(height: 10),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(
+                                      'Data: $dataFormatada',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: GestureDetector(
+                                      onTap: () async {
+                                        if (await canLaunch(urlRegistro)) {
+                                          await launch(urlRegistro);
+                                        }
+                                      },
+                                      child: Text(
+                                        'Assistir: $dominio',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.blue,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Divider(),
+                                ],
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                        actions: [
+                          ElevatedButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                            },
+                            child: Text('Fechar'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                } else {
+                  print('Falha ao carregar o histórico do deputado');
+                }
               },
               child: Text('Atividades'),
             ),
-            SizedBox(height: 10.0),
+            Divider(),
             Text(
-              'Despesas',
+              'Despesas de: ${deputado['nome']}',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                fontSize: 18.0,
+                fontSize: 16.0,
               ),
             ),
-            SizedBox(height: 0.0),
             Row(
-              mainAxisAlignment: MainAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 DropdownButton<int>(
                   hint: Text('Ano'),
